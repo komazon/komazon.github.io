@@ -15,20 +15,23 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
     <link rel="stylesheet" href="https://unpkg.com/98.css">
     <style>
     .aa-container {
-      /* 背景色と文字色の設定（お好みで変更してください） */
-      background-color: #008080 !important;
-      color: #008080 !important;
-      
-      /* 余白と表示の設定 */
-      padding: 20px;
-      overflow-x: auto; /* 横幅が溢れた場合にスクロールバーを表示 */
-      
-      /* AA保持用の必須スタイル */
-      font-family: "Consolas", "Courier New", "Courier", "MS Gothic", monospace;
-      font-size: 10px;        /* 巨大AAのため小さめに設定 */
-      line-height: 1.0;       /* 行間を詰めて縦ズレを防止 */
-      white-space: pre;       /* スペースや改行をそのまま保持 */
-      letter-spacing: 0;      /* 文字間隔を固定 */
+      /* 背景色・文字色の同化 */
+  background-color: #008080 !important;
+  color: #008080 !important;
+
+  /* 枠線・影・3D効果の徹底排除 */
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  border-image: none !important;
+
+  /* スクロールバーの非表示（はみ出しを隠す） */
+  overflow: hidden !important; 
+}
+
+/* Chrome / Safari / Edge 用スクロールバー完全消去 */
+pre::-webkit-scrollbar {
+  display: none !important;
     }
   </style>
 </head>
