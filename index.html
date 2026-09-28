@@ -15,23 +15,33 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
     <link rel="stylesheet" href="https://unpkg.com/98.css">
     <style>
     .aa-container {
-      /* 背景色・文字色の同化 */
-  background-color: #008080 !important;
+    pre, pre * {
+  /* 背景色と文字色 */
+  background: #008080 !important;
   color: #008080 !important;
 
-  /* 枠線・影・3D効果の徹底排除 */
+  /* 枠線・影・パディング・背景指定のリセット */
   border: none !important;
   box-shadow: none !important;
   outline: none !important;
-  border-image: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
 
-  /* スクロールバーの非表示（はみ出しを隠す） */
-  overflow: hidden !important; 
+  /* スクロールバー非表示 */
+  overflow: hidden !important;
 }
 
-/* Chrome / Safari / Edge 用スクロールバー完全消去 */
+/* 疑似要素（::before / ::after）による枠線の消去 */
+pre::before,
+pre::after {
+  content: none !important;
+  display: none !important;
+}
+
+/* Webkit系スクロールバー消去 */
 pre::-webkit-scrollbar {
   display: none !important;
+}
     }
   </style>
 </head>
