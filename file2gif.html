@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Binary ⇔ GIF Converter (98.css)</title>
+  <!-- 98.css -->
+  <link rel="stylesheet" href="https://unpkg.com/98.css">
+  <style>
+    body {
+      background-color: #008080;
+      padding: 20px;
+      display: flex;
+      justify-content: center;
+    }
+    .window {
+      width: 100%;
+      max-width: 800px;
+    }
+    .window-body {
+      padding: 16px;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    fieldset {
+      margin-bottom: 16px;
+      padding: 12px;
+    }
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+    }
+    .status {
+      margin-top: 8px;
+      font-size: 12px;
+      min-height: 16px;
+    }
+    .status.error {
+      color: #ff0000;
+      font-weight: bold;
+    }
+    .status.success {
+      color: #008000;
+      font-weight: bold;
+    }
+    .result-list {
+      margin-top: 12px;
+      max-height: 300px;
+      overflow-y: auto;
+      border: 1px solid #ccc;
+      padding: 8px;
+      background: #fff;
+    }
+    .result-item {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 8px;
+      border-bottom: 1px solid #eee;
+    }
+    .result-item:last-child {
+      border-bottom: none;
+    }
+    .preview-img {
+      width: 120px;
+      border: 1px solid #000;
+      image-rendering: pixelated;
+    }
+    textarea {
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .preview-text {
+      width: 100%;
+      height: 100px;
+      font-family: monospace;
+      font-size: 12px;
+      resize: vertical;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="window">
+    <div class="title-bar">
+      <div class="title-bar-text">Binary ⇔ GIF Converter</div>
+      <div class="title-bar-controls">
+        <button aria-label="Minimize"></button>
+        <button aria-label="Maximize"></button>
+        <button class="window-button" aria-label="Close" onclick="window.location.href='index.html'">×</button>
+      </div>
+    </div>
+    
+    <div class="window-body">
+      
+      <!-- エンコードセクション -->
+      <fieldset>
+        <legend>エンコード (File → GIFs)</legend>
+        <p style="font-size:12px; margin:0 0 8px 0;">
+          任意のファイルを選んでください。1=黒、0=白。<br>
+          全体の最初は緑、最後は赤、分割境界は<b>黄色</b>のフレームになります。<br>
+          マーカーフレームの白いドット部分に、復元用のIDと分割番号が埋め込まれます。
+        </p>
+        
+        <div class="row">
+          <label>ファイル:</label>
+          <input type="file" id="encodeFile" style="width: 300px;">
+        </div>
+        <div class="row">
+          <label>GIFあたりの最大フレーム数:</label>
+          <input type="number" id="maxFrames" value="1000" min="3" style="width: 100px;">
+        </div>
+        <div class="row">
+          <button id="encodeBtn">GIFを生成</button>
+        </div>
+        
+        <div id="encodeStatus" class="status"></div>
+        <div id="encodeResults" class="result-list" style="display:none;"></div>
+      </fieldset>
+
+      <!-- デコードセクション -->
+      <fieldset>
+        <legend>デコード (GIFs → File)</legend>
+        <p style="font-size:12px; margin:0 0 8px 0;">
+          生成したGIF（複数可）を選択してください。ファイル名は問いません。<br>
+          マーカーフレーム（緑・赤・黄色）の白いドットからIDと順番を読み取り、自動で結合します。
+        </p>
+        
+        <div class="row">
+          <label>GIFファイル:</label>
+          <input type="file" id="decodeFiles" accept=".gif" multiple style="width: 300px;">
+        </div>
+        <div class="row">
+          <button id="decodeBtn">バイナリを復元</button>
+        </div>
+        
+        <div id="decodeStatus" class="status"></div>
+        
+        <div id="decodeResultsList" style="display:none; margin-top:12px;"></div>
+      </fieldset>
+
+    </div>
+  </div>
+
+  <script type="module">
+    // 必要なライブラリをすべてESモジュールとしてインポート
+    import { GIFEncoder } from 'https://cdn.jsdelivr.net/npm/gifenc@1.0.3/dist/gifenc.esm.js';
+    import { parseGIF, decompressFrames } from 'https://cdn.jsdelivr.net/npm/gifuct-js@2.1.2/+esm';
+
+    // 定数
+    const COLS = 8;
+    const ROWS = 6;
+    const BITS_PER_FRAME = COLS * ROWS; // 48
+    const SCALE = 50; // 1マスあたりのピクセル数
+
+    // ユーティリティ: データフレームから8x6のビット列を抽出（黒=1, 白=0）
+    function extractDataBits(ctx, width, height) {
+      const cellW = width / COLS;
+      const cellH = height / ROWS;
+      let bits = '';
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const x = Math.floor(c * cellW + cellW / 2);
+          const y = Math.floor(r * cellH + cellH / 2);
+          const pixel = ctx.getImageData(x, y, 1, 1).data;
+          const brightness = (pixel[0] + pixel[1] + pixel[2]) / 3;
+          bits += brightness < 128 ? '1' : '0';
+        }
+      }
+      return bits;
+    }
+
+    // ユーティリティ: マーカーフレームからメタデータビットを抽出（ベース色=1, 白=0）
+    function extractMetaBits(ctx, width, height) {
+      const cellW = width / COLS;
+      const cellH = height / ROWS;
+      let bits = '';
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const x = Math.floor(c * cellW + cellW / 2);
+          const y = Math.floor(r * cellH + cellH / 2);
+          const pixel = ctx.getImageData(x, y, 1, 1).data;
+          // 白に近い場合は0、それ以外（黄・緑・赤）は1
+          const isWhite = (pixel[0] > 200 && pixel[1] > 200 && pixel[2] > 200);
+          bits += isWhite ? '0' : '1';
+        }
+      }
+      return bits;
+    }
+
+    // ==========================================
+    // エンコード処理 (File -> GIFs)
+    // ==========================================
+    document.getElementById('encodeBtn').addEventListener('click', async () => {
+      const fileInput = document.getElementById('encodeFile');
+      const maxFrames = parseInt(document.getElementById('maxFrames').value, 10);
+      const statusEl = document.getElementById('encodeStatus');
+      const resultsEl = document.getElementById('encodeResults');
+      const btn = document.getElementById('encodeBtn');
+      
+      statusEl.className = 'status';
+      resultsEl.style.display = 'none';
+      resultsEl.innerHTML = '';
+      
+      if (!fileInput.files.length) {
+        statusEl.innerText = 'エラー: ファイルを選択してください。';
+        statusEl.classList.add('error');
+        return;
+      }
+      if (maxFrames < 3) {
+        statusEl.innerText = 'エラー: 最大フレーム数は3以上にしてください。';
+        statusEl.classList.add('error');
+        return;
+      }
+      
+      const file = fileInput.files[0];
+      btn.disabled = true;
+      statusEl.innerText = 'ファイルを読み込み中...';
+      
+      try {
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        
+        let bits = '';
+        for (let i = 0; i < bytes.length; i++) {
+          bits += bytes[i].toString(2).padStart(8, '0');
+        }
+        
+        const totalDataFrames = Math.ceil(bits.length / BITS_PER_FRAME);
+        const maxDataFramesPerGif = maxFrames - 2; 
+        
+        const numGifs = Math.ceil(totalDataFrames / maxDataFramesPerGif);
+        
+        if (numGifs > 255) {
+          statusEl.innerText = 'エラー: 分割数が255を超えました。最大フレーム数を増やしてください。';
+          statusEl.classList.add('error');
+          btn.disabled = false;
+          return;
+        }
+
+        const uniqueId = Math.floor(Math.random() * 65535) + 1;
+        
+        statusEl.innerText = `GIFを生成中... (全 ${totalDataFrames} データフレーム, ${numGifs} ファイル, ID:${uniqueId})`;
+        
+        for (let g = 0; g < numGifs; g++) {
+          const startFrame = g * maxDataFramesPerGif;
+          const endFrame = Math.min((g + 1) * maxDataFramesPerGif, totalDataFrames);
+          const chunkBits = bits.substring(startFrame * BITS_PER_FRAME, endFrame * BITS_PER_FRAME);
+          
+          const paddedBits = chunkBits.padEnd(Math.ceil(chunkBits.length / BITS_PER_FRAME) * BITS_PER_FRAME, '0');
+          const dataFramesCount = paddedBits.length / BITS_PER_FRAME;
+          
+          const blob = await createGif(paddedBits, dataFramesCount, uniqueId, g, numGifs);
+          const url = URL.createObjectURL(blob);
+          
+          const item = document.createElement('div');
+          item.className = 'result-item';
+          item.innerHTML = `
+            <img src="${url}" class="preview-img" alt="preview">
+            <div>
+              <div style="font-weight:bold; margin-bottom:4px;">output_${g + 1}.gif</div>
+              <div style="font-size:12px; color:#666;">フレーム数: ${dataFramesCount + 2} (データ:${dataFramesCount})</div>
+              <a href="${url}" download="output_${g + 1}.gif" class="button" style="margin-top:4px; display:inline-block; text-decoration:none; font-size:12px;">ダウンロード</a>
+            </div>
+          `;
+          resultsEl.appendChild(item);
+          
+          await new Promise(r => setTimeout(r, 10));
+        }
+        
+        resultsEl.style.display = 'block';
+        statusEl.innerText = 'GIFの生成が完了しました！';
+        statusEl.classList.add('success');
+        
+      } catch (err) {
+        console.error(err);
+        statusEl.innerText = `エラー: GIFの生成に失敗しました。(${err.message || err})`;
+        statusEl.classList.add('error');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    // GIF生成ヘルパー (gifencを使用)
+    async function createGif(bits, numDataFrames, id, chunkIndex, totalChunks) {
+      const width = COLS * SCALE;
+      const height = ROWS * SCALE;
+      
+      const gif = GIFEncoder();
+      
+      const palette = [
+        [255, 255, 255],
+        [0, 0, 0],
+        [0, 255, 0],
+        [255, 0, 0],
+        [255, 255, 0]
+      ];
+      
+      const colorToIndex = {
+        '255,255,255': 0,
+        '0,0,0': 1,
+        '0,255,0': 2,
+        '255,0,0': 3,
+        '255,255,0': 4
+      };
+      
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      
+      const addFrame = (drawFn, delay) => {
+        drawFn(ctx);
+        const imageData = ctx.getImageData(0, 0, width, height);
+        const data = imageData.data;
+        const indexArray = new Uint8Array(width * height);
+        
+        for (let i = 0; i < data.length; i += 4) {
+          const key = `${data[i]},${data[i+1]},${data[i+2]}`;
+          indexArray[i/4] = colorToIndex[key] !== undefined ? colorToIndex[key] : 0;
+        }
+        
+        gif.writeFrame(indexArray, width, height, { palette, delay });
+      };
+      
+      const createMarkerDrawFn = (baseColorStr, metaBits) => {
+        return (ctx) => {
+          ctx.fillStyle = baseColorStr;
+          ctx.fillRect(0, 0, width, height);
+          
+          const cellW = width / COLS;
+          const cellH = height / ROWS;
+          ctx.fillStyle = '#FFFFFF';
+          for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+              if (metaBits[r * COLS + c] === '0') {
+                ctx.fillRect(c * cellW, r * cellH, cellW, cellH);
+              }
+            }
+          }
+        };
+      };
+      
+      const metaBits = id.toString(2).padStart(16, '0') + 
+                       chunkIndex.toString(2).padStart(8, '0') + 
+                       totalChunks.toString(2).padStart(8, '0') + 
+                       '0'.repeat(16);
+      
+      const startColor = (chunkIndex === 0) ? 'rgb(0,255,0)' : 'rgb(255,255,0)';
+      addFrame(createMarkerDrawFn(startColor, metaBits), 100);
+      
+      for (let i = 0; i < numDataFrames; i++) {
+        const frameBits = bits.substring(i * BITS_PER_FRAME, (i + 1) * BITS_PER_FRAME);
+        addFrame((ctx) => {
+          ctx.fillStyle = 'rgb(255,255,255)';
+          ctx.fillRect(0, 0, width, height);
+          for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+              if (frameBits[r * COLS + c] === '1') {
+                ctx.fillStyle = 'rgb(0,0,0)';
+                ctx.fillRect(c * SCALE, r * SCALE, SCALE, SCALE);
+              }
+            }
+          }
+        }, 100);
+      }
+      
+      const endColor = (chunkIndex === totalChunks - 1) ? 'rgb(255,0,0)' : 'rgb(255,255,0)';
+      addFrame(createMarkerDrawFn(endColor, metaBits), 100);
+      
+      gif.finish();
+      return new Blob([gif.bytes()], { type: 'image/gif' });
+    }
+
+    // ==========================================
+    // デコード処理 (GIFs -> File)
+    // ==========================================
+    document.getElementById('decodeBtn').addEventListener('click', async () => {
+      const fileInput = document.getElementById('decodeFiles');
+      const statusEl = document.getElementById('decodeStatus');
+      const resultsList = document.getElementById('decodeResultsList');
+      const btn = document.getElementById('decodeBtn');
+      
+      statusEl.className = 'status';
+      resultsList.style.display = 'none';
+      resultsList.innerHTML = '';
+      
+      if (!fileInput.files.length) {
+        statusEl.innerText = 'エラー: GIFファイルを選択してください。';
+        statusEl.classList.add('error');
+        return;
+      }
+      
+      btn.disabled = true;
+      statusEl.innerText = 'GIFを解析中...';
+      
+      try {
+        const gifGroups = {}; 
+        
+        for (const file of fileInput.files) {
+          const buffer = await file.arrayBuffer();
+          const gif = parseGIF(buffer);
+          const frames = decompressFrames(gif, true);
+          
+          if (frames.length < 3) continue;
+
+          const fullWidth = gif.lsd.width;
+          const fullHeight = gif.lsd.height;
+          
+          const startFrame = frames[0];
+          const sDims = startFrame.dims;
+          const sImageData = new ImageData(new Uint8ClampedArray(startFrame.patch), sDims.width, sDims.height);
+          const sCanvas = document.createElement('canvas');
+          sCanvas.width = sDims.width; sCanvas.height = sDims.height;
+          const sCtx = sCanvas.getContext('2d');
+          sCtx.putImageData(sImageData, 0, 0);
+          
+          const metaBits = extractMetaBits(sCtx, sDims.width, sDims.height);
+          
+          const id = parseInt(metaBits.substring(0, 16), 2);
+          const chunkIndex = parseInt(metaBits.substring(16, 24), 2);
+          const totalChunks = parseInt(metaBits.substring(24, 32), 2);
+          
+          if (id === 0 || totalChunks === 0) {
+            console.warn(`ファイル ${file.name} はメタデータが無効のためスキップします。`);
+            continue;
+          }
+          
+          if (!gifGroups[id]) {
+            gifGroups[id] = { totalChunks, chunks: [] };
+          }
+          
+          const dataFrames = frames.slice(1, -1);
+          
+          gifGroups[id].chunks.push({
+            chunkIndex,
+            dataFrames,
+            fullWidth,
+            fullHeight
+          });
+        }
+        
+        const groupIds = Object.keys(gifGroups);
+        if (groupIds.length === 0) {
+          statusEl.innerText = 'エラー: 有効なメタデータを持つGIFが見つかりませんでした。';
+          statusEl.classList.add('error');
+          btn.disabled = false;
+          return;
+        }
+        
+        for (const id of groupIds) {
+          const group = gifGroups[id];
+          group.chunks.sort((a, b) => a.chunkIndex - b.chunkIndex);
+          
+          let allBits = '';
+          for (const chunk of group.chunks) {
+            const canvas = document.createElement('canvas');
+            canvas.width = chunk.fullWidth;
+            canvas.height = chunk.fullHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, chunk.fullWidth, chunk.fullHeight);
+            
+            for (const frame of chunk.dataFrames) {
+              const dims = frame.dims;
+              const imageData = new ImageData(new Uint8ClampedArray(frame.patch), dims.width, dims.height);
+              const tempCanvas = document.createElement('canvas');
+              tempCanvas.width = dims.width;
+              tempCanvas.height = dims.height;
+              tempCanvas.getContext('2d').putImageData(imageData, 0, 0);
+              
+              ctx.drawImage(tempCanvas, dims.left, dims.top);
+              
+              const frameBits = extractDataBits(ctx, chunk.fullWidth, chunk.fullHeight);
+              allBits += frameBits;
+            }
+          }
+          
+          const numBytes = Math.floor(allBits.length / 8);
+          const bytes = new Uint8Array(numBytes);
+          for (let i = 0; i < numBytes; i++) {
+            const byteStr = allBits.substring(i * 8, (i + 1) * 8);
+            bytes[i] = parseInt(byteStr, 2);
+          }
+          
+          const blob = new Blob([bytes], { type: 'application/octet-stream' });
+          const url = URL.createObjectURL(blob);
+          
+          const item = document.createElement('div');
+          item.className = 'result-item';
+          item.style.border = '1px solid #000';
+          item.style.marginBottom = '8px';
+          item.style.padding = '12px';
+          item.style.background = '#f0f0f0';
+          
+          const isComplete = group.chunks.length === group.totalChunks;
+          const warning = isComplete ? '' : `<span style="color:red;font-size:12px;">(警告: ${group.chunks.length}/${group.totalChunks} チャンクのみ)</span>`;
+          
+          item.innerHTML = `
+            <div style="flex-grow:1;">
+              <div style="font-weight:bold; margin-bottom:8px;">復元データ (ID: ${id}) ${warning}</div>
+              <div style="font-size:12px; margin-bottom:8px;">サイズ: ${bytes.length} バイト</div>
+              <a href="${url}" download="decoded_${id}.bin" class="button" style="display:inline-block; text-decoration:none; font-size:12px;">ダウンロード</a>
+            </div>
+          `;
+          resultsList.appendChild(item);
+        }
+        
+        resultsList.style.display = 'block';
+        statusEl.innerText = `デコード完了: ${groupIds.length} 件のファイルを復元しました。`;
+        statusEl.classList.add('success');
+        
+      } catch (e) {
+        console.error(e);
+        statusEl.innerText = `エラー: GIFの解析に失敗しました。(${e.message || e})`;
+        statusEl.classList.add('error');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
