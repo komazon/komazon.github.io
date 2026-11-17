@@ -1,0 +1,7 @@
+
+
+main {
+  width: 300px;
+  margin: 0 auto; /* 箱自体を左右中央へ */
+  align-items: center; min-height: 100vh;
+}
